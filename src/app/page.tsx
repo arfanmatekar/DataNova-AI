@@ -47,6 +47,7 @@ import { PageShell } from "@/components/ui/page-shell";
 import { ScoreRing } from "@/components/ui/score-ring";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { aiMessages, datasets, interviewQuestions, learningPaths, learningStats, projects, resumeInsights } from "@/data/platform";
+import { analyzeUploadedFile, type FileAnalysis } from "@/lib/file-analysis";
 
 const chartData = [
   { name: "Jan", score: 58, completion: 41 },
@@ -129,9 +130,31 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("Python");
   const [activeProject, setActiveProject] = useState("Beginner");
   const [query, setQuery] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<FileAnalysis | null>(null);
+  const [error, setError] = useState("");
 
   const filteredCourses = learningPaths.filter((course) => activeTab === "All" || course.category === activeTab);
   const visibleProjects = projects.filter((project) => activeProject === "All" || project.level === activeProject);
+
+  const handleFileChange = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setError("");
+    setAnalysis(null);
+
+    try {
+      const result = await analyzeUploadedFile(file);
+      setAnalysis(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "The file could not be analyzed.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   return (
     <PageShell onToggleTheme={() => setTheme((current) => (current === "light" ? "dark" : "light"))}>
@@ -396,13 +419,63 @@ export default function Home() {
 
         <section id="resume-coach" className="mb-8 grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
           <GlassCard className="p-5 sm:p-6">
-            <SectionHeading eyebrow="Resume analyzer" title="ATS health" description="Upload your resume and get role-specific feedback." />
-            <label className="mt-3 flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-3xl border border-dashed border-violet-300 bg-violet-50 text-center dark:border-violet-500/30 dark:bg-violet-500/10">
+            <SectionHeading eyebrow="File workspace" title="Upload and inspect files" description="Analyze supported documents and datasets directly in your browser." />
+            <label className="mt-3 flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-3xl border border-dashed border-violet-300 bg-violet-50 px-5 text-center transition hover:border-violet-500 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:hover:bg-violet-500/15">
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt,.csv,.json"
+                className="hidden"
+                onChange={(event) => handleFileChange(event.target.files?.[0])}
+              />
               <Upload className="text-violet-600 dark:text-violet-200" size={28} />
-              <span className="mt-3 font-semibold text-slate-800 dark:text-slate-100">Drop resume here</span>
-              <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">PDF, DOCX up to 5 MB</span>
+              <span className="mt-3 font-semibold text-slate-800 dark:text-slate-100">Drop a file here or browse</span>
+              <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">CSV, JSON, TXT, PDF, or DOCX — up to 5 MB</span>
             </label>
-            <button className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white dark:bg-white dark:text-slate-950"><FileCheck size={16} /> Analyze resume</button>
+            <button
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-slate-950"
+              onClick={() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click()}
+              disabled={isAnalyzing}
+            >
+              <FileCheck size={16} />
+              {isAnalyzing ? "Analyzing file..." : "Choose file"}
+            </button>
+
+            {error ? (
+              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                {error}
+              </div>
+            ) : null}
+
+            {analysis ? (
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-violet-500 dark:text-violet-300">Analysis result</p>
+                    <h4 className="mt-2 text-lg font-bold text-slate-900 dark:text-white">{analysis.name}</h4>
+                  </div>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{analysis.type}</span>
+                </div>
+                <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{analysis.summary}</p>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl bg-white p-3 dark:bg-slate-950"><span className="text-slate-500 dark:text-slate-400">Size</span><p className="mt-1 font-semibold">{(analysis.size / 1024 / 1024).toFixed(2)} MB</p></div>
+                  <div className="rounded-xl bg-white p-3 dark:bg-slate-950"><span className="text-slate-500 dark:text-slate-400">Records</span><p className="mt-1 font-semibold">{analysis.recordCount}</p></div>
+                </div>
+                {analysis.columns.length > 0 ? (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">Columns</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {analysis.columns.map((column) => <span key={column} className="rounded-full bg-violet-100 px-2.5 py-1 text-xs text-violet-700 dark:bg-violet-500/10 dark:text-violet-200">{column}</span>)}
+                    </div>
+                  </div>
+                ) : null}
+                {analysis.preview.length > 0 ? (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400">Preview</p>
+                    <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-950 p-3 text-xs leading-6 text-slate-200">{analysis.preview.join("\n")}</pre>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </GlassCard>
 
           <GlassCard className="p-5 sm:p-6">
